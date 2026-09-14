@@ -96,3 +96,32 @@ Written to `Output\` (git-ignored):
 * If the same `ref` appears more than once in the CSV while `PodReference` is still blank, only
   the first `UPDATE` run will actually change data - the `AND PodReference = ' '` guard makes the
   rest no-ops on a re-run, matching the existing manual process.
+
+## Measure-PodEntryDelay.ps1
+Measures how long it takes, in hours, between an invoice's `PodEntryDate` (the POD time
+reported by the carrier/ATS) and the moment the ATS integration actually writes that update to
+SYSPRO `ArInvoice` - sourced directly from the ATS `WorkingDirectory\Log\Log_YYYYMMDD.debug`
+files (not from SYSPRO), across both:
+* `\\Ee01-vmsrv02\e$\ATSEcotrend\WorkingDirectory\Log`
+* `\\Ee01-vmsrv02\e$\ATSEcotrendOnt\WorkingDirectory\Log`
+
+Each log line running the "query to update orders with ATS tracking numbers" statement gives
+the update timestamp (line prefix, year taken from the log file name) and the `PodEntryDate` in
+the SQL text itself; `HoursDiff` = update time minus `PodEntryDate`.
+
+Because the update SQL guards on `AND PodReference = ' '`, the same invoice can appear multiple
+times in the log (the feed re-sending an already-updated record) - only the first run actually
+changes SYSPRO. The report keeps every log line but marks the earliest one per
+Source/Invoice/PodEntryDate as `IsFirstAttempt = True`; use that column to see the real delay
+distribution. Rows where `PodEntryDate` falls after the update time (negative `HoursDiff`) are
+marked with a `ReviewFlag` - this points to bad source data (e.g. a future-dated POD), not a
+timing issue.
+
+### Usage
+```powershell
+.\Measure-PodEntryDelay.ps1
+.\Measure-PodEntryDelay.ps1 -StartDate "2026-04-01" -EndDate "2026-08-28"
+```
+Run monthly with no arguments to keep the "April 1 through today" window, or pass
+`-StartDate`/`-EndDate` for a different range. Output: `Output\PodEntryDelay_<timestamp>.csv`,
+sorted by Month, Date, UpdatedTime, Invoice.
